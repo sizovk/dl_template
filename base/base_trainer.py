@@ -21,6 +21,8 @@ class BaseTrainer:
         self.epochs = cfg_trainer['epochs']
         self.save_period = cfg_trainer['save_period']
         self.monitor = cfg_trainer.get('monitor', 'off')
+        self.log_step = cfg_trainer.get('log_step', 50)
+        self.len_epoch = cfg_trainer.get('len_epoch')
 
         # configuration to monitor model performance and save best
         if self.monitor == 'off':
@@ -40,7 +42,7 @@ class BaseTrainer:
         self.checkpoint_dir = config.save_dir
 
         # setup visualization writer instance                
-        self.writer = get_visualizer(config, self.logger, cfg_trainer["visualize"])
+        self.writer = get_visualizer(config, self.logger, cfg_trainer.get("visualize"))
 
         if config.resume is not None:
             self._resume_checkpoint(config.resume)

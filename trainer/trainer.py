@@ -10,25 +10,23 @@ class Trainer(BaseTrainer):
     Trainer class
     """
     def __init__(self, model, criterion, metrics, optimizer, config, device,
-                 data_loader, valid_data_loader=None, lr_scheduler=None, len_epoch=None):
+                 data_loader, valid_data_loader=None, lr_scheduler=None):
         super().__init__(model, criterion, metrics, optimizer, config)
         self.config = config
         self.device = device
         self.data_loader = data_loader
-        if len_epoch is None:
+        if self.len_epoch is None:
             # epoch-based training
             self.len_epoch = len(self.data_loader)
         else:
             # iteration-based training
             self.data_loader = inf_loop(data_loader)
-            self.len_epoch = len_epoch
         self.valid_data_loader = valid_data_loader
         self.do_validation = self.valid_data_loader is not None
         self.lr_scheduler = lr_scheduler
-        self.log_step = int(np.sqrt(data_loader.batch_size))
 
-        self.train_metrics = MetricTracker('loss', *[m.__name__ for m in self.metrics], writer=self.writer)
-        self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metrics], writer=self.writer)
+        self.train_metrics = MetricTracker('loss', 'grad_norm', *[m.__name__ for m in self.metrics])
+        self.valid_metrics = MetricTracker('loss', *[m.__name__ for m in self.metrics])
 
     def _train_epoch(self, epoch):
         """
@@ -48,17 +46,24 @@ class Trainer(BaseTrainer):
             loss.backward()
             self.optimizer.step()
 
-            self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
             self.train_metrics.update('loss', loss.item())
             for met in self.metrics:
                 self.train_metrics.update(met.__name__, met(output, target))
+            self.train_metrics.update("grad_norm", self.get_grad_norm())
 
             if batch_idx % self.log_step == 0:
+                if self.writer is not None:
+                    self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx, mode="train")
+                    if self.lr_scheduler is not None:
+                        self.writer.add_scalar(
+                            "learning_rate", self.lr_scheduler.get_last_lr()[0]
+                        )
+                    for metric_name in self.train_metrics.keys():
+                        self.writer.add_scalar(f"{metric_name}", self.train_metrics.avg(metric_name))
                 self.logger.debug('Train Epoch: {} {} Loss: {:.6f}'.format(
                     epoch,
                     self._progress(batch_idx),
                     loss.item()))
-                self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
 
             if batch_idx == self.len_epoch:
                 break
@@ -88,23 +93,32 @@ class Trainer(BaseTrainer):
                 output = self.model(data)
                 loss = self.criterion(output, target)
 
-                self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
                 self.valid_metrics.update('loss', loss.item())
                 for met in self.metrics:
                     self.valid_metrics.update(met.__name__, met(output, target))
-                self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+        if self.writer is not None:
+            self.writer.set_step(epoch * self.len_epoch, mode="val")
+            for metric_name in self.valid_metrics.keys():
+                self.writer.add_scalar(f"{metric_name}", self.valid_metrics.avg(metric_name))
 
-        # add histogram of model parameters to the tensorboard
-        for name, p in self.model.named_parameters():
-            self.writer.add_histogram(name, p, bins='auto')
         return self.valid_metrics.result()
 
     def _progress(self, batch_idx):
-        base = '[{}/{} ({:.0f}%)]'
-        if hasattr(self.data_loader, 'n_samples'):
-            current = batch_idx * self.data_loader.batch_size
-            total = self.data_loader.n_samples
-        else:
-            current = batch_idx
-            total = self.len_epoch
+        base = '[{}/{} steps ({:.0f}%)]'
+        current = batch_idx
+        total = self.len_epoch
         return base.format(current, total, 100.0 * current / total)
+    
+    @torch.no_grad()
+    def get_grad_norm(self, norm_type=2):
+        parameters = self.model.parameters()
+        if isinstance(parameters, torch.Tensor):
+            parameters = [parameters]
+        parameters = [p for p in parameters if p.grad is not None]
+        total_norm = torch.norm(
+            torch.stack(
+                [torch.norm(p.grad.detach(), norm_type).cpu() for p in parameters]
+            ),
+            norm_type,
+        )
+        return total_norm.item()

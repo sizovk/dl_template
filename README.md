@@ -4,7 +4,5 @@ My template for DL projects, inspired from [PyTorch Template Project](https://gi
 
 ### Backlog
 
-- add logging grad_norm and learning rate
 - add project generator script
-- add disabling wandb
 - add test script
