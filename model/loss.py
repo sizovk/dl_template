@@ -1,1 +1,1 @@
-from torch.nn.functional import nll_loss
+from torch.nn import NLLLoss

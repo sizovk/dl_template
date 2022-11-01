@@ -1,5 +1,5 @@
 {
-    "name": "experiment_ame",
+    "name": "experiment_name",
     "n_gpu": 1,
     "arch": {
         "type": "MnistModel",
@@ -28,7 +28,10 @@
             "amsgrad": true
         }
     },
-    "loss": "nll_loss",
+    "loss": {
+        "type": "NLLLoss",
+        "args": {}
+    },
     "metrics": [
         "accuracy", "top_k_acc"
     ],
